@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 import sys
+import getopt
 import re
+import time
 import requests
 from bs4 import BeautifulSoup
 import spotipy
 import spotipy.util as util
 import json
+from NetCloud.NetCloudLogin import NetCloudLogin
 
 headers = {
     'Referer' : "http://music.163.com/",
@@ -13,6 +16,35 @@ headers = {
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:38.0) Gecko/20100101 Firefox/38.0 Ic',
     'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
 }
+
+
+def cloud_music_get_daily_recommend(username, pwd) : 
+    daily_recommend = []
+    list_name = time.strftime("%m/%d/%y") + " Daily Recommend"
+    phone = username
+    password = pwd
+    email = None
+    rememberLogin = True
+    login = NetCloudLogin(phone = phone,password = password,email = email,rememberLogin = rememberLogin)
+    recomend_song_list = login.get_self_daily_recommend().json()['recommend']
+    for rcmd_song in recomend_song_list : 
+        item = [rcmd_song['name'], rcmd_song['artists'][0]['name']]
+        daily_recommend.append(item)
+    return daily_recommend, list_name
+
+def cloud_music_sync_playlists(username, pwd): 
+    play_lists = []
+    phone = username
+    password = pwd
+    email = None
+    rememberLogin = True
+    login = NetCloudLogin(phone = phone,password = password,email = email,rememberLogin = rememberLogin)
+    self_playlists = login.get_self_play_list().json()['playlist']
+    for playlist in self_playlists :
+        play_lists.append(get_list(playlist['id']))
+    return play_lists
+
+
 
 def get_list(id) :
     songlist = []
@@ -60,17 +92,11 @@ def set_spotify_playlist(sp, username, list_name) :
         list_id = get_list_id_by_name(sp, username, list_name)  
     return list_id  
 
-
-if __name__ == "__main__" :
-    cloud_list_id = "162499819"
-    username = "9sbqcfyysw4ew7ltg9svtla1v"
-    description = 'Playlist from Cloud music'
-    sp = spotify_auth(username)  
-    cloud_songlist, list_name = get_list(cloud_list_id)
+def transfer_playlist(sp, spotify_username, cloud_playlist, list_name) : 
     print("Creating a new list: ", list_name)
-    spotify_list_id = set_spotify_playlist(sp, username, list_name)
+    spotify_list_id = set_spotify_playlist(sp, spotify_username, list_name)
     count = 0
-    for song, singer in cloud_songlist :
+    for song, singer in cloud_playlist :
         r_chinese_bracket = re.compile(r'\（.*?\）' )
         r_english_bracket = re.compile(r'\(.*?\)' )
         main_title = r_chinese_bracket.sub('', song)
@@ -86,9 +112,48 @@ if __name__ == "__main__" :
                 if str(item['artists'][0]['name']) == artist['name'] :
                     print(item['name'] + ' - ' + item['artists'][0]['name'])
                     spotify_uri_list.append(item['uri'])
-                    sp.user_playlist_add_tracks(username, spotify_list_id, spotify_uri_list)
+                    sp.user_playlist_add_tracks(spotify_username, spotify_list_id, spotify_uri_list)
                     spotify_uri_list.clear()
                     count = count + 1
                     break    
-    print("Songs from Cloud music: ", len(cloud_songlist), "Songs added to Spotify: ", count)
+    print("Songs from Cloud music: ", len(cloud_playlist), "Songs added to Spotify: ", count)
+
+def main(argv=None) :
+    daily = False
+    sync = False
+    try:
+        opts, args = getopt.getopt(argv, "DSu:p:U:",["daily", "sync", "cloudid=", "cloudpwd=", "spotifyid="])
+    except getopt.GetoptError:
+        print("Error: Cloud2Spotify.py [--daily] [--sync] -u <cloudid> -p <cloudpwd> -U <spotifyid>")
+        return 2
+    for opt, arg in opts:
+        if opt in ("-D", "--daily"):
+            daily = True
+        if opt in ("-S", "--sync"):
+            sync = True
+        if opt in ("-u", "--cloudid"):
+            cloud_username = arg
+        if opt in ("-p", "--cloudpwd"):
+            cloud_pwd = arg
+        if opt in ("-U", "--spotifyid"):
+            spotify_username = arg
+
+    if daily : 
+        cloud_playlist, list_name = cloud_music_get_daily_recommend(cloud_username, cloud_pwd)
+        sp = spotify_auth(spotify_username)
+        transfer_playlist(sp, spotify_username, cloud_playlist, list_name)
+    if sync :
+        play_lists = cloud_music_sync_playlists(cloud_username, cloud_pwd)
+        sp = spotify_auth(spotify_username)
+        for list_name, cloud_playlist in play_lists :
+            transfer_playlist(sp, spotify_username, cloud_playlist, list_name)
+
+    
+def test() :
+    title = 'title'
+    songs = ['song1', 'song2']
+    return title, songs
+
+if __name__ == "__main__" :
+    sys.exit(main(sys.argv[1:]))
     
